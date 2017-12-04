@@ -11,11 +11,20 @@ import random
 import matplotlib.pyplot as plt
 
 from enum import Enum
+import math
+import numpy.random as rand
 
 
 class Status(Enum):
     BUSY = 0
     IDLE = 1
+
+
+class Customer:
+    def __init__(self, arrival_time):
+        self.arrival_time = arrival_time
+        self.delay_in_queue = None
+        self.service_time = None
 
 
 # Parameters
@@ -29,7 +38,13 @@ class Params:
 # States and statistical counters
 class States:
     def __init__(self):
-        self.server_status = Status.IDLE
+        #self.server_status = Status.IDLE
+        self.number_of_servers_busy = 0
+        self.total_utilization = 0.0
+        self.total_queue_area = 0.0
+        self.total_delay = 0.0
+        self.last_event_time = 0.0
+
         # States
         self.queue = []
 
@@ -41,13 +56,27 @@ class States:
 
     def update(self, sim, event):
         if event.eventType == 'ARRIVAL':
-            if sim.states.server_status == Status.BUSY:
-                
-        elif event.eventType == 'DEPARTURE:
-
+            sim.states.total_queue_area += (event.eventTime - sim.states.last_event_time) * len(sim.states.queue)
+            sim.states.total_utilization += (event.eventTime - sim.states.last_event_time) * (sim.states.number_of_servers_busy / sim.params.k)
+        elif event.eventType == 'DEPARTURE':
+            sim.states.served += 1
+            sim.states.total_utilization += (event.eventTime - sim.states.last_event_time) * (sim.states.number_of_servers_busy / sim.params.k)
+            if len(sim.states.queue) == 0:
+                None
+            else:
+                sim.states.total_queue_area += (event.eventTime - sim.states.last_event_time) * len(sim.states.queue)
+                arrival_time_of_this_person = sim.states.queue.pop()
+                sim.states.total_delay += event.eventTime - arrival_time_of_this_person
+        else:
+            print('Unknown eventType to update')
 
     def finish(self, sim):
-        None
+        if self.last_event_time != 0:
+            self.util = self.total_utilization / self.last_event_time
+            self.avgQlength = self.total_queue_area / self.last_event_time
+
+        if self.served != 0:
+            self.avgQdelay = self.total_delay / self.served
 
     def printResults(self, sim):
         # DO NOT CHANGE THESE LINES
@@ -73,6 +102,9 @@ class Event:
     def __repr__(self):
         return self.eventType
 
+    def __lt__(self, other):
+        return self.eventTime < other.eventTime
+
 
 class StartEvent(Event):
     def __init__(self, eventTime, sim):
@@ -81,7 +113,9 @@ class StartEvent(Event):
         self.sim = sim
 
     def process(self, sim):
-        None
+        sim.scheduleEvent(ArrivalEvent(sim.now() + sim.get_random(sim.params.lambd), sim))
+        sim.scheduleEvent(ExitEvent(10, sim))
+        sim.states.last_event_time = self.eventTime
 
 
 class ExitEvent(Event):
@@ -91,7 +125,7 @@ class ExitEvent(Event):
         self.sim = sim
 
     def process(self, sim):
-        None
+        sim.states.last_event_time = self.eventTime
 
 
 class ArrivalEvent(Event):
@@ -101,12 +135,16 @@ class ArrivalEvent(Event):
         self.sim = sim
 
     def process(self, sim):
-        sim.scheduleEvent(ArrivalEvent(sim.seed, sim))
-        if sim.states.server_status == Status.BUSY:
-            sim.states.queue.append(1)
+        # rand or random ekta use korlei hobe
+        sim.scheduleEvent(ArrivalEvent(sim.now() + sim.get_random(sim.params.lambd), sim))
+
+        if sim.states.number_of_servers_busy >= sim.params.k:
+            sim.states.queue.append(self.eventTime)
         else:
-            sim.states.server_status = Status.BUSY
-            sim.scheduleEvent(DepartureEvent(sim.seed, sim))
+            sim.states.number_of_servers_busy += 1
+            sim.scheduleEvent(DepartureEvent(sim.now() + sim.get_random(sim.params.lambd), sim))
+
+        sim.states.last_event_time = self.eventTime
 
 
 class DepartureEvent(Event):
@@ -116,12 +154,13 @@ class DepartureEvent(Event):
         self.sim = sim
 
     def process(self, sim):
+
         if len(sim.states.queue) == 0:
-            sim.states.server_status = Status.IDLE
-            # eliminate departure event korte hobe
+            sim.states.number_of_servers_busy -= 1
         else:
-            sim.states.queue.pop()
-            sim.scheduleEvent(DepartureEvent(sim.seed, sim))
+            sim.scheduleEvent(DepartureEvent(sim.now() + sim.get_random(sim.params.mu), sim))
+
+        sim.states.last_event_time = self.eventTime
 
 
 class Simulator:
@@ -171,6 +210,9 @@ class Simulator:
     def getResults(self):
         return self.states.getResults(self)
 
+    def get_random(self, arrival_or_departure_rate):
+        return - math.log(rand.uniform(0, 1)) / arrival_or_departure_rate
+
 
 def experiment1():
     seed = 101
@@ -180,7 +222,7 @@ def experiment1():
     sim.printResults()
 
 
-def experiment2():
+def experiment2(k):
     seed = 110
     mu = 1000.0 / 60
     ratios = [u / 10.0 for u in range(1, 11)]
@@ -191,7 +233,7 @@ def experiment2():
 
     for ro in ratios:
         sim = Simulator(seed)
-        sim.configure(Params(mu * ro, mu, 1), States())
+        sim.configure(Params(mu * ro, mu, k), States())
         sim.run()
 
         length, delay, utl = sim.getResults()
@@ -221,7 +263,8 @@ def experiment2():
 def experiment3():
     # Similar to experiment2 but for different values of k; 1, 2, 3, 4
     # Generate the same plots
-    None
+    for x in range(1, 5):
+        experiment2(x)
 
 
 def main():
